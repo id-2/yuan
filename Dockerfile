@@ -34,7 +34,7 @@ FROM runtime AS telegram-bot
 # Install ffmpeg and whisper.cpp for local transcription
 RUN set -eux; \
     apk add --no-cache ffmpeg libstdc++; \
-    apk add --no-cache --virtual .whisper-build git build-base wget; \
+    apk add --no-cache --virtual .whisper-build git build-base cmake wget; \
     git clone --depth 1 https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp; \
     make -C /opt/whisper.cpp; \
     wget -O /opt/whisper.cpp/models/ggml-base.en.bin \

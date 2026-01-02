@@ -30,27 +30,16 @@ WORKDIR /app/packages/orchestrator
 EXPOSE 3000
 CMD ["node", "dist/index.js"]
 
-FROM node:20-bookworm-slim AS telegram-bot
-WORKDIR /app
-ENV NODE_ENV=production
-
-COPY --from=runtime /app/package.json /app/package-lock.json ./
-COPY --from=runtime /app/node_modules ./node_modules
-COPY --from=runtime /app/packages ./packages
-
+FROM runtime AS telegram-bot
 # Install ffmpeg and whisper.cpp for local transcription
 RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-      ffmpeg git build-essential cmake wget ca-certificates; \
+    apk add --no-cache ffmpeg libstdc++; \
+    apk add --no-cache --virtual .whisper-build git build-base cmake wget; \
     git clone --depth 1 https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp; \
     make -C /opt/whisper.cpp; \
     wget -O /opt/whisper.cpp/models/ggml-base.en.bin \
       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin; \
     ln -s /opt/whisper.cpp/main /usr/local/bin/whisper; \
-    apt-get purge -y git build-essential cmake wget; \
-    apt-get autoremove -y; \
-    rm -rf /var/lib/apt/lists/*
-
+    apk del .whisper-build
 WORKDIR /app/packages/telegram-bot
 CMD ["node", "dist/index.js"]

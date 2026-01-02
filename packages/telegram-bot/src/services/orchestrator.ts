@@ -24,6 +24,7 @@ export class OrchestratorClient extends EventEmitter {
   private config: OrchestratorConfig;
   private ws: WebSocket | null = null;
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  private reconnectAttempts = 0;
   private isConnecting = false;
 
   constructor(config: OrchestratorConfig) {
@@ -56,7 +57,12 @@ export class OrchestratorClient extends EventEmitter {
 
         this.ws.on('open', () => {
           console.log('Connected to orchestrator via WebSocket');
+          this.reconnectAttempts = 0;
           this.isConnecting = false;
+          if (this.reconnectTimeout) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = null;
+          }
           this.emit('connected');
           resolve();
         });
@@ -96,12 +102,17 @@ export class OrchestratorClient extends EventEmitter {
       clearTimeout(this.reconnectTimeout);
     }
 
+    const baseDelay = Math.min(5000 * Math.pow(2, this.reconnectAttempts), 30000);
+    const jitter = Math.random() * 1000;
+    const delay = baseDelay + jitter;
+    this.reconnectAttempts += 1;
+
     this.reconnectTimeout = setTimeout(() => {
       console.log('Attempting to reconnect to orchestrator...');
       this.connect().catch(error => {
         console.error('Reconnection failed:', error);
       });
-    }, 5000);
+    }, delay);
   }
 
   async sendInstruction(instruction: Instruction): Promise<void> {

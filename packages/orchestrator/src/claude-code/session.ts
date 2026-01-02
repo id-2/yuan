@@ -183,6 +183,10 @@ export class ClaudeCodeSession extends EventEmitter {
           regex: /stop_reason["']?:\s*["']?max_tokens/i,
           message: 'Claude stopped because it reached the maximum token budget. Please request a shorter response.',
         },
+        {
+          regex: /max_tokens/i,
+          message: 'Claude reached its token budget and stopped early. Try asking for a shorter reply.',
+        },
       ];
 
       const trackTokenUsage = (text: string): void => {
@@ -240,6 +244,8 @@ export class ClaudeCodeSession extends EventEmitter {
               trackTokenUsage(message.result);
             } else if ((message as { stop_reason?: string }).stop_reason === 'max_tokens') {
               detectTruncation('stop_reason:max_tokens');
+            } else if (message.type === 'text' && message.content) {
+              trackTokenUsage(message.content);
             }
           } catch {
             // Not JSON, treat as plain text output

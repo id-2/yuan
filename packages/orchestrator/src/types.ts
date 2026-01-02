@@ -17,6 +17,8 @@ export interface OrchestratorUpdate {
   agent?: AgentType;
   inputId?: string;
   expectedInputFormat?: 'text' | 'json' | string;
+  taskId?: string;
+  taskTitle?: string;
   approvalId?: string;
   approvalDetails?: {
     action: string;

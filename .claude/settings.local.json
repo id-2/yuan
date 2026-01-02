@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git merge-base:*)",
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr list:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(git pull:*)",
+      "WebFetch(domain:patch-diff.githubusercontent.com)",
+      "Bash(xargs git log --oneline -1)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

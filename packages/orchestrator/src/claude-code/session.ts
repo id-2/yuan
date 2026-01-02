@@ -120,6 +120,8 @@ export class ClaudeCodeSession extends EventEmitter {
         userId,
         message: `🚀 Starting with Claude: ${taskDescription}`,
         agent: this.agentType,
+        taskId: task.id,
+        taskTitle: task.description,
       } as OrchestratorUpdate);
 
       // Build the prompt with context
@@ -331,6 +333,7 @@ export class ClaudeCodeSession extends EventEmitter {
 
         for (const detection of detections) {
           const repoContext = this.sessionManager.getFullRepoName() || 'current directory';
+          const currentTask = this.sessionManager.getCurrentTask();
           const approved = await this.approvalGate.requestApproval(
             userId,
             detection,
@@ -344,6 +347,8 @@ export class ClaudeCodeSession extends EventEmitter {
               userId,
               message: `⛔ Action rejected: ${detection.action}`,
               agent: this.agentType,
+              taskId: currentTask?.id,
+              taskTitle: currentTask?.description,
             } as OrchestratorUpdate);
           } else {
             this.emit('update', {
@@ -351,6 +356,8 @@ export class ClaudeCodeSession extends EventEmitter {
               userId,
               message: `✅ Action approved: ${detection.action}`,
               agent: this.agentType,
+              taskId: currentTask?.id,
+              taskTitle: currentTask?.description,
             } as OrchestratorUpdate);
           }
         }
@@ -368,11 +375,14 @@ export class ClaudeCodeSession extends EventEmitter {
 
         // Summarize the response for the user
         const summary = this.summarizeResponse(fullResponse);
+        const currentTask = this.sessionManager.getCurrentTask();
         this.emit('update', {
           type: 'TASK_COMPLETE',
           userId,
           message: summary,
           agent: this.agentType,
+          taskId: currentTask?.id,
+          taskTitle: currentTask?.description,
         } as OrchestratorUpdate);
 
         resolve();
@@ -384,6 +394,7 @@ export class ClaudeCodeSession extends EventEmitter {
     message: StreamMessage,
     userId: string
   ): void {
+    const currentTask = this.sessionManager.getCurrentTask();
     const inputPrompt = this.extractInputPrompt(message);
     if (inputPrompt) {
       const inputId = inputPrompt.inputId ?? uuidv4();
@@ -401,6 +412,8 @@ export class ClaudeCodeSession extends EventEmitter {
         agent: this.agentType,
         inputId,
         expectedInputFormat: inputPrompt.expectedFormat,
+        taskId: currentTask?.id,
+        taskTitle: currentTask?.description,
       } as OrchestratorUpdate);
       return;
     }
@@ -417,6 +430,8 @@ export class ClaudeCodeSession extends EventEmitter {
           userId,
           message: `🔧 Executing: ${message.tool}`,
           agent: this.agentType,
+          taskId: currentTask?.id,
+          taskTitle: currentTask?.description,
         } as OrchestratorUpdate);
       }
     } else if (message.type === 'text' && message.content) {
@@ -428,6 +443,8 @@ export class ClaudeCodeSession extends EventEmitter {
           userId,
           message: `📝 Working: ${preview}...`,
           agent: this.agentType,
+          taskId: currentTask?.id,
+          taskTitle: currentTask?.description,
         } as OrchestratorUpdate);
       }
     }

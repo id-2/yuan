@@ -86,13 +86,15 @@ export class CodexSession extends EventEmitter {
       }
 
       const taskDescription = this.extractTaskDescription(instruction);
-      this.sessionManager.startTask(taskDescription, userId, this.agentType);
+      const task = this.sessionManager.startTask(taskDescription, userId, this.agentType);
 
       this.emit('update', {
         type: 'STATUS_UPDATE',
         userId,
         message: `🚀 Starting with Codex CLI: ${taskDescription}`,
         agent: this.agentType,
+        taskId: task.id,
+        taskTitle: task.description,
       } as OrchestratorUpdate);
 
       const contextPrompt = this.intentParser.buildContextPrompt();
@@ -207,18 +209,24 @@ export class CodexSession extends EventEmitter {
           );
 
           if (!approved) {
+            const currentTask = this.sessionManager.getCurrentTask();
             this.emit('update', {
               type: 'STATUS_UPDATE',
               userId,
               message: `⛔ Action rejected: ${detection.action}`,
               agent: this.agentType,
+              taskId: currentTask?.id,
+              taskTitle: currentTask?.description,
             } as OrchestratorUpdate);
           } else {
+            const currentTask = this.sessionManager.getCurrentTask();
             this.emit('update', {
               type: 'STATUS_UPDATE',
               userId,
               message: `✅ Action approved: ${detection.action}`,
               agent: this.agentType,
+              taskId: currentTask?.id,
+              taskTitle: currentTask?.description,
             } as OrchestratorUpdate);
           }
         }
@@ -233,11 +241,14 @@ export class CodexSession extends EventEmitter {
         this.sessionManager.completeTask();
 
         const summary = this.summarizeResponse(fullResponse);
+        const currentTask = this.sessionManager.getCurrentTask();
         this.emit('update', {
           type: 'TASK_COMPLETE',
           userId,
           message: summary,
           agent: this.agentType,
+          taskId: currentTask?.id,
+          taskTitle: currentTask?.description,
         } as OrchestratorUpdate);
 
         resolve();
@@ -246,6 +257,8 @@ export class CodexSession extends EventEmitter {
   }
 
   private handleStreamMessage(message: StreamMessage, userId: string): void {
+    const currentTask = this.sessionManager.getCurrentTask();
+
     if (message.type === 'tool_use' && message.tool) {
       const toolInput = JSON.stringify(message.tool_input || {});
       const detection = this.approvalDetector.detect(toolInput);
@@ -256,6 +269,8 @@ export class CodexSession extends EventEmitter {
           userId,
           message: `🔧 Executing: ${message.tool}`,
           agent: this.agentType,
+          taskId: currentTask?.id,
+          taskTitle: currentTask?.description,
         } as OrchestratorUpdate);
       }
     } else if (message.type === 'text' && message.content) {
@@ -266,6 +281,8 @@ export class CodexSession extends EventEmitter {
           userId,
           message: `📝 Working: ${preview}...`,
           agent: this.agentType,
+          taskId: currentTask?.id,
+          taskTitle: currentTask?.description,
         } as OrchestratorUpdate);
       }
     }

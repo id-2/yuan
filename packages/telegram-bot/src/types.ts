@@ -15,6 +15,8 @@ export interface OrchestratorUpdate {
   agentId?: string;
   message: string;
   agent?: AgentType;
+  taskId?: string;
+  taskTitle?: string;
   approvalId?: string;
   approvalDetails?: {
     action: string;

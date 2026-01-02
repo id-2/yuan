@@ -4,7 +4,7 @@ import { OrchestratorClient } from './services/orchestrator.js';
 import { VoiceHandler } from './handlers/voice.js';
 import { TextHandler } from './handlers/text.js';
 import { CallbackHandler } from './handlers/callback.js';
-import type { OrchestratorUpdate } from './types.js';
+import type { AgentType, OrchestratorUpdate } from './types.js';
 
 interface BotConfig {
   telegramBotToken: string;
@@ -27,6 +27,7 @@ export class TelegramBot {
   private textHandler: TextHandler;
   private callbackHandler: CallbackHandler;
   private userChatMap: Map<string, number> = new Map();
+  private lastStatusMessages: Map<string, { messageId: number; chatId: number }> = new Map();
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -167,7 +168,7 @@ export class TelegramBot {
     try {
       switch (update.type) {
         case 'STATUS_UPDATE':
-          await this.bot.api.sendMessage(chatId, `📊 ${update.message}`);
+          await this.sendOrEditStatusMessage(chatId, update, '📊');
           break;
 
         case 'INPUT_NEEDED':
@@ -183,7 +184,7 @@ export class TelegramBot {
           break;
 
         case 'TASK_COMPLETE':
-          await this.bot.api.sendMessage(chatId, `✅ ${update.message}`);
+          await this.sendOrEditStatusMessage(chatId, update, '✅', true);
           break;
 
         case 'ERROR':
@@ -194,6 +195,66 @@ export class TelegramBot {
       }
     } catch (error) {
       console.error('Failed to send update to user:', error);
+    }
+  }
+
+  private getStatusKey(update: OrchestratorUpdate): string {
+    const taskKey = update.taskId ?? 'default';
+    return `${update.userId}:${taskKey}`;
+  }
+
+  private formatAgent(agent?: AgentType): string {
+    if (agent === 'codex') return 'ChatGPT Codex';
+    if (agent === 'claude') return 'Claude Code';
+    return 'Agent';
+  }
+
+  private formatStatusText(update: OrchestratorUpdate, prefix: string): string {
+    const agentLabel = this.formatAgent(update.agent);
+    const title = update.taskTitle ? ` • ${update.taskTitle}` : '';
+    return `${prefix} [${agentLabel}${title}] ${update.message}`;
+  }
+
+  private buildQuickReplyKeyboard(taskId?: string): InlineKeyboard {
+    return new InlineKeyboard()
+      .text('📝 Provide input', `quick:input:${taskId ?? 'unknown'}`)
+      .text('🔁 Retry', `quick:retry:${taskId ?? 'unknown'}`)
+      .text('✖️ Cancel', `quick:cancel:${taskId ?? 'unknown'}`);
+  }
+
+  private async sendOrEditStatusMessage(
+    chatId: number,
+    update: OrchestratorUpdate,
+    prefix: string,
+    clearAfterSend = false
+  ): Promise<void> {
+    const key = this.getStatusKey(update);
+    const statusText = this.formatStatusText(update, prefix);
+    const keyboard = this.buildQuickReplyKeyboard(update.taskId);
+    const existing = this.lastStatusMessages.get(key);
+
+    if (existing) {
+      try {
+        await this.bot.api.editMessageText(existing.chatId, existing.messageId, statusText, {
+          reply_markup: keyboard,
+        });
+        if (clearAfterSend) {
+          this.lastStatusMessages.delete(key);
+        }
+        return;
+      } catch (error) {
+        console.warn('Failed to edit status message, sending new one instead:', error);
+      }
+    }
+
+    const sent = await this.bot.api.sendMessage(chatId, statusText, {
+      reply_markup: keyboard,
+    });
+
+    if (!clearAfterSend) {
+      this.lastStatusMessages.set(key, { chatId, messageId: sent.message_id });
+    } else {
+      this.lastStatusMessages.delete(key);
     }
   }
 
@@ -209,6 +270,8 @@ export class TelegramBot {
 
     const message =
       `🔐 *Approval Required*\n\n` +
+      `*Agent:* ${this.formatAgent(update.agent)}\n` +
+      (update.taskTitle ? `*Task:* ${update.taskTitle}\n` : '') +
       `*Action:* ${update.approvalDetails.action}\n` +
       `*Repo:* ${update.approvalDetails.repo}\n` +
       `*Details:* ${update.approvalDetails.details}`;

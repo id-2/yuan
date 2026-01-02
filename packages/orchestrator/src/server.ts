@@ -22,6 +22,8 @@ interface ServerConfig {
   codexCommand?: string;
   codexArgs?: string[];
   workingDirectory?: string;
+  claudeTokenLimit?: number;
+  claudeTokenWarningRatio?: number;
 }
 
 export class OrchestratorServer {
@@ -54,6 +56,8 @@ export class OrchestratorServer {
       sessionManager: this.sessionManager,
       approvalGate: this.approvalGate,
       agentType: 'claude',
+      tokenLimit: config.claudeTokenLimit,
+      tokenWarningRatio: config.claudeTokenWarningRatio,
     });
 
     this.codexSession = new CodexSession({

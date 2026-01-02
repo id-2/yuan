@@ -12,6 +12,8 @@ interface ClaudeSessionConfig {
   sessionManager?: SessionManager;
   approvalGate: ApprovalGate;
   agentType?: AgentType;
+  tokenLimit?: number;
+  tokenWarningRatio?: number;
 }
 
 interface StreamMessage {
@@ -32,6 +34,9 @@ export class ClaudeCodeSession extends EventEmitter {
   private isProcessing = false;
   private currentProcess: ChildProcess | null = null;
   private agentType: AgentType;
+  private tokenLimit: number;
+  private tokenWarningRatio: number;
+  private readonly averageCharsPerToken = 4;
 
   constructor(config: ClaudeSessionConfig) {
     super();
@@ -41,6 +46,14 @@ export class ClaudeCodeSession extends EventEmitter {
     this.approvalDetector = new ApprovalDetector();
     this.approvalGate = config.approvalGate;
     this.agentType = config.agentType ?? 'claude';
+    const configuredLimit = config.tokenLimit ?? 200000;
+    this.tokenLimit = Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : 200000;
+
+    const configuredRatio = config.tokenWarningRatio ?? 0.9;
+    this.tokenWarningRatio =
+      Number.isFinite(configuredRatio) && configuredRatio > 0 && configuredRatio <= 1
+        ? configuredRatio
+        : 0.9;
   }
 
   getSessionManager(): SessionManager {
@@ -152,6 +165,57 @@ export class ClaudeCodeSession extends EventEmitter {
 
       let fullResponse = '';
       let buffer = '';
+      let totalChars = 0;
+      let totalWords = 0;
+      let warnedTokenLimit = false;
+      let truncationError: string | null = null;
+
+      const truncationPatterns: Array<{ regex: RegExp; message: string }> = [
+        {
+          regex: /response (?:was )?truncated/i,
+          message: 'Claude output was truncated due to response length limits. Please reduce the request size or ask for a shorter answer.',
+        },
+        {
+          regex: /exceeded (?:the )?maximum (?:tokens|context length)/i,
+          message: 'Claude hit the maximum context size and stopped early. Try simplifying the request or splitting it into smaller steps.',
+        },
+        {
+          regex: /stop_reason["']?:\s*["']?max_tokens/i,
+          message: 'Claude stopped because it reached the maximum token budget. Please request a shorter response.',
+        },
+      ];
+
+      const trackTokenUsage = (text: string): void => {
+        if (!text) return;
+        totalChars += text.length;
+        const wordMatches = text.trim() ? text.trim().split(/\s+/) : [];
+        totalWords += wordMatches.length;
+
+        const approxTokens = Math.max(
+          Math.ceil(totalChars / this.averageCharsPerToken),
+          totalWords
+        );
+
+        if (!warnedTokenLimit && approxTokens >= this.tokenLimit * this.tokenWarningRatio) {
+          warnedTokenLimit = true;
+          this.emit('update', {
+            type: 'STATUS_UPDATE',
+            userId,
+            message: `⚠️ Approaching Claude output limit (~${approxTokens} of ${this.tokenLimit} tokens). Output may be truncated.`,
+            agent: this.agentType,
+          } as OrchestratorUpdate);
+        }
+      };
+
+      const detectTruncation = (text: string): void => {
+        if (truncationError || !text) return;
+        for (const pattern of truncationPatterns) {
+          if (pattern.regex.test(text)) {
+            truncationError = pattern.message;
+            break;
+          }
+        }
+      };
 
       this.currentProcess.stdout?.on('data', (data: Buffer) => {
         buffer += data.toString();
@@ -162,6 +226,7 @@ export class ClaudeCodeSession extends EventEmitter {
 
         for (const line of lines) {
           if (!line.trim()) continue;
+          detectTruncation(line);
 
           try {
             const message: StreamMessage = JSON.parse(line);
@@ -169,18 +234,25 @@ export class ClaudeCodeSession extends EventEmitter {
 
             if (message.type === 'assistant' && message.content) {
               fullResponse += message.content;
+              trackTokenUsage(message.content);
             } else if (message.type === 'result' && message.result) {
               fullResponse += message.result;
+              trackTokenUsage(message.result);
+            } else if ((message as { stop_reason?: string }).stop_reason === 'max_tokens') {
+              detectTruncation('stop_reason:max_tokens');
             }
           } catch {
             // Not JSON, treat as plain text output
             fullResponse += line + '\n';
+            trackTokenUsage(line);
           }
         }
       });
 
       this.currentProcess.stderr?.on('data', (data: Buffer) => {
-        console.error('Claude Code stderr:', data.toString());
+        const text = data.toString();
+        detectTruncation(text);
+        console.error('Claude Code stderr:', text);
       });
 
       this.currentProcess.on('error', (error) => {
@@ -192,14 +264,29 @@ export class ClaudeCodeSession extends EventEmitter {
       this.currentProcess.on('close', async (code) => {
         // Process any remaining buffer
         if (buffer.trim()) {
+          detectTruncation(buffer);
           try {
             const message: StreamMessage = JSON.parse(buffer);
             if (message.type === 'assistant' && message.content) {
               fullResponse += message.content;
+              trackTokenUsage(message.content);
             }
           } catch {
             fullResponse += buffer;
+            trackTokenUsage(buffer);
           }
+        }
+
+        if (truncationError) {
+          this.sessionManager.failTask();
+          this.emit('update', {
+            type: 'ERROR',
+            userId,
+            message: truncationError,
+            agent: this.agentType,
+          } as OrchestratorUpdate);
+          resolve();
+          return;
         }
 
         if (code !== 0 && code !== null) {

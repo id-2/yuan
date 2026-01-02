@@ -13,6 +13,16 @@ function getOptionalEnv(name: string, defaultValue: string): string {
   return process.env[name] || defaultValue;
 }
 
+function getOptionalNumberEnv(name: string, defaultValue: number): number {
+  const value = process.env[name];
+  if (value === undefined) return defaultValue;
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Invalid number for environment variable ${name}: ${value}`);
+  }
+  return parsed;
+}
+
 async function main(): Promise<void> {
   console.log('Starting Claude Code Orchestrator...');
 
@@ -27,6 +37,8 @@ async function main(): Promise<void> {
     codexCommand,
     codexArgs,
     workingDirectory: process.env.WORKING_DIRECTORY || process.cwd(),
+    claudeTokenLimit: getOptionalNumberEnv('CLAUDE_TOKEN_LIMIT', 200000),
+    claudeTokenWarningRatio: getOptionalNumberEnv('CLAUDE_TOKEN_WARNING_RATIO', 0.9),
   });
 
   // Graceful shutdown

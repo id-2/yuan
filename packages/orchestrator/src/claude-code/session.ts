@@ -23,9 +23,17 @@ interface ClaudeSessionConfig {
   tokenWarningRatio?: number;
 }
 
+interface ContentBlock {
+  type: string;
+  text?: string;
+}
+
 interface StreamMessage {
   type: string;
   content?: string;
+  message?: {
+    content?: ContentBlock[];
+  };
   tool?: string;
   tool_input?: unknown;
   result?: string;
@@ -263,9 +271,16 @@ export class ClaudeCodeSession extends EventEmitter {
             const message: StreamMessage = JSON.parse(line);
             this.handleStreamMessage(message, userId, taskId);
 
-            if (message.type === 'assistant' && message.content) {
-              fullResponse += message.content;
-              trackTokenUsage(message.content);
+            if (message.type === 'assistant') {
+              // Handle nested message structure: {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
+              const textContent = message.message?.content
+                ?.filter((block) => block.type === 'text' && block.text)
+                .map((block) => block.text)
+                .join('') || message.content;
+              if (textContent) {
+                fullResponse += textContent;
+                trackTokenUsage(textContent);
+              }
             } else if (message.type === 'result' && message.result) {
               fullResponse += message.result;
               trackTokenUsage(message.result);
@@ -302,9 +317,15 @@ export class ClaudeCodeSession extends EventEmitter {
           detectTruncation(buffer);
           try {
             const message: StreamMessage = JSON.parse(buffer);
-            if (message.type === 'assistant' && message.content) {
-              fullResponse += message.content;
-              trackTokenUsage(message.content);
+            if (message.type === 'assistant') {
+              const textContent = message.message?.content
+                ?.filter((block) => block.type === 'text' && block.text)
+                .map((block) => block.text)
+                .join('') || message.content;
+              if (textContent) {
+                fullResponse += textContent;
+                trackTokenUsage(textContent);
+              }
             }
           } catch {
             fullResponse += buffer;

@@ -37,6 +37,8 @@ interface StreamMessage {
   tool?: string;
   tool_input?: unknown;
   result?: string;
+  error?: string;
+  is_error?: boolean;
   id?: string;
   input_schema?: unknown;
   prompt?: string;
@@ -226,6 +228,8 @@ export class ClaudeCodeSession extends EventEmitter {
       let totalWords = 0;
       let warnedTokenLimit = false;
       let truncationError: string | null = null;
+      let streamError: string | null = null;
+      let streamErrorNotified = false;
 
       const truncationPatterns: Array<{ regex: RegExp; message: string }> = [
         {
@@ -245,6 +249,49 @@ export class ClaudeCodeSession extends EventEmitter {
           message: 'Claude reached its token budget and stopped early. Try asking for a shorter reply.',
         },
       ];
+
+      const extractTextContent = (message: StreamMessage): string | undefined => {
+        return message.message?.content
+          ?.filter((block) => block.type === 'text' && block.text)
+          .map((block) => block.text)
+          .join('') || message.content;
+      };
+
+      const extractStreamError = (message: StreamMessage): string | null => {
+        if (message.error) {
+          const textContent = extractTextContent(message);
+          if (textContent) {
+            return textContent;
+          }
+          if (message.result) {
+            return message.result;
+          }
+          return `Claude Code error: ${message.error}`;
+        }
+
+        if (message.type === 'result' && message.is_error) {
+          return message.result || 'Claude Code returned an error.';
+        }
+
+        return null;
+      };
+
+      const handleStreamError = (errorMessage: string): void => {
+        if (streamErrorNotified) return;
+        streamErrorNotified = true;
+        streamError = errorMessage;
+        this.sessionManager.failTask();
+        this.emit('update', {
+          type: 'ERROR',
+          userId,
+          message: errorMessage,
+          agent: this.agentType,
+          taskId,
+        } as OrchestratorUpdate);
+        if (this.currentProcess) {
+          this.currentProcess.kill('SIGTERM');
+        }
+      };
 
       const trackTokenUsage = (text: string): void => {
         if (!text) return;
@@ -293,12 +340,15 @@ export class ClaudeCodeSession extends EventEmitter {
             const message: StreamMessage = JSON.parse(line);
             this.handleStreamMessage(message, userId, taskId);
 
+            const streamErrorMessage = extractStreamError(message);
+            if (streamErrorMessage) {
+              handleStreamError(streamErrorMessage);
+              continue;
+            }
+
             if (message.type === 'assistant') {
               // Handle nested message structure: {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
-              const textContent = message.message?.content
-                ?.filter((block) => block.type === 'text' && block.text)
-                .map((block) => block.text)
-                .join('') || message.content;
+              const textContent = extractTextContent(message);
               if (textContent) {
                 fullResponse += textContent;
                 trackTokenUsage(textContent);
@@ -367,6 +417,11 @@ export class ClaudeCodeSession extends EventEmitter {
           return;
         }
 
+        if (streamErrorNotified) {
+          resolve();
+          return;
+        }
+
         if (code !== 0 && code !== null) {
           console.error(`Claude Code exited with code ${code}`);
           this.sessionManager.failTask();
@@ -374,7 +429,7 @@ export class ClaudeCodeSession extends EventEmitter {
           this.emit('update', {
             type: 'ERROR',
             userId,
-            message: `Claude Code process exited with code ${code}`,
+            message: streamError ?? `Claude Code process exited with code ${code}`,
             agent: this.agentType,
             taskId,
           } as OrchestratorUpdate);

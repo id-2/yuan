@@ -2,12 +2,13 @@ import { spawn, type ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import type { AgentType, ConversationMessage, OrchestratorUpdate, TaskInfo } from '../types.js';
 import { SessionManager } from '../state/session.js';
-import { IntentParser } from './parser.js';
-import { ApprovalDetector, type DetectedApproval } from '../approval/detector.js';
-import { ApprovalGate } from '../approval/gate.js';
+import { IntentParser } from '../claude-code/parser.js';
+import { ApprovalDetector } from '../approval/detector.js';
+import type { ApprovalGate } from '../approval/gate.js';
 
-interface ClaudeSessionConfig {
-  anthropicApiKey: string;
+interface CodexSessionConfig {
+  command?: string;
+  args?: string[];
   workingDirectory?: string;
   sessionManager?: SessionManager;
   approvalGate: ApprovalGate;
@@ -22,8 +23,10 @@ interface StreamMessage {
   result?: string;
 }
 
-export class ClaudeCodeSession extends EventEmitter {
-  private config: ClaudeSessionConfig;
+export class CodexSession extends EventEmitter {
+  private command: string;
+  private args: string[];
+  private config: CodexSessionConfig;
   private sessionManager: SessionManager;
   private intentParser: IntentParser;
   private approvalDetector: ApprovalDetector;
@@ -33,22 +36,20 @@ export class ClaudeCodeSession extends EventEmitter {
   private currentProcess: ChildProcess | null = null;
   private agentType: AgentType;
 
-  constructor(config: ClaudeSessionConfig) {
+  constructor(config: CodexSessionConfig) {
     super();
     this.config = config;
+    this.command = config.command || 'codex';
+    this.args = config.args || [];
     this.sessionManager = config.sessionManager ?? new SessionManager();
     this.intentParser = new IntentParser(this.sessionManager);
     this.approvalDetector = new ApprovalDetector();
     this.approvalGate = config.approvalGate;
-    this.agentType = config.agentType ?? 'claude';
+    this.agentType = config.agentType ?? 'codex';
   }
 
   getSessionManager(): SessionManager {
     return this.sessionManager;
-  }
-
-  getApprovalGate(): ApprovalGate {
-    return this.approvalGate;
   }
 
   isCurrentlyProcessing(): boolean {
@@ -69,12 +70,10 @@ export class ClaudeCodeSession extends EventEmitter {
     this.isProcessing = true;
 
     try {
-      // Parse for repo context changes
       const context = this.intentParser.parseRepoContext(instruction);
       if (context) {
         this.intentParser.applyContext(context);
 
-        // Notify user of context switch
         if (context.action === 'switch' || context.action === 'create') {
           const repoName = this.sessionManager.getFullRepoName() || context.repo;
           this.emit('update', {
@@ -86,32 +85,27 @@ export class ClaudeCodeSession extends EventEmitter {
         }
       }
 
-      // Start task tracking
       const taskDescription = this.extractTaskDescription(instruction);
-      const task = this.sessionManager.startTask(taskDescription, userId, this.agentType);
+      this.sessionManager.startTask(taskDescription, userId, this.agentType);
 
       this.emit('update', {
         type: 'STATUS_UPDATE',
         userId,
-        message: `🚀 Starting with Claude: ${taskDescription}`,
+        message: `🚀 Starting with Codex CLI: ${taskDescription}`,
         agent: this.agentType,
       } as OrchestratorUpdate);
 
-      // Build the prompt with context
       const contextPrompt = this.intentParser.buildContextPrompt();
       const fullPrompt = contextPrompt + instruction;
 
-      // Add to conversation history
       this.conversationHistory.push({
         role: 'user',
         content: fullPrompt,
       });
 
-      // Execute with Claude Code CLI
-      await this.executeWithClaudeCodeCLI(fullPrompt, userId, task);
-
+      await this.executeWithCodexCLI(fullPrompt, userId);
     } catch (error) {
-      console.error('Error processing instruction:', error);
+      console.error('Error processing instruction with Codex:', error);
       this.sessionManager.failTask();
 
       this.emit('update', {
@@ -126,27 +120,14 @@ export class ClaudeCodeSession extends EventEmitter {
     }
   }
 
-  private async executeWithClaudeCodeCLI(
-    prompt: string,
-    userId: string,
-    _task: TaskInfo
-  ): Promise<void> {
+  private async executeWithCodexCLI(prompt: string, userId: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const workingDir = this.config.workingDirectory || process.cwd();
+      const args = [...this.args, prompt];
 
-      // Spawn Claude Code CLI in non-interactive mode
-      const args = [
-        '--print',           // Non-interactive print mode
-        '--output-format', 'stream-json',  // JSON streaming output
-        prompt
-      ];
-
-      this.currentProcess = spawn('claude', args, {
+      this.currentProcess = spawn(this.command, args, {
         cwd: workingDir,
-        env: {
-          ...process.env,
-          ANTHROPIC_API_KEY: this.config.anthropicApiKey,
-        },
+        env: process.env,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -156,9 +137,8 @@ export class ClaudeCodeSession extends EventEmitter {
       this.currentProcess.stdout?.on('data', (data: Buffer) => {
         buffer += data.toString();
 
-        // Process complete JSON lines
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
           if (!line.trim()) continue;
@@ -173,24 +153,22 @@ export class ClaudeCodeSession extends EventEmitter {
               fullResponse += message.result;
             }
           } catch {
-            // Not JSON, treat as plain text output
             fullResponse += line + '\n';
           }
         }
       });
 
       this.currentProcess.stderr?.on('data', (data: Buffer) => {
-        console.error('Claude Code stderr:', data.toString());
+        console.error('Codex CLI stderr:', data.toString());
       });
 
       this.currentProcess.on('error', (error) => {
-        console.error('Failed to spawn Claude Code:', error);
+        console.error('Failed to spawn Codex CLI:', error);
         this.sessionManager.failTask();
-        reject(new Error(`Failed to start Claude Code: ${error.message}`));
+        reject(new Error(`Failed to start Codex CLI (${this.command}): ${error.message}`));
       });
 
       this.currentProcess.on('close', async (code) => {
-        // Process any remaining buffer
         if (buffer.trim()) {
           try {
             const message: StreamMessage = JSON.parse(buffer);
@@ -203,21 +181,20 @@ export class ClaudeCodeSession extends EventEmitter {
         }
 
         if (code !== 0 && code !== null) {
-          console.error(`Claude Code exited with code ${code}`);
+          console.error(`Codex CLI exited with code ${code}`);
           this.sessionManager.failTask();
 
           this.emit('update', {
             type: 'ERROR',
             userId,
-            message: `Claude Code process exited with code ${code}`,
+            message: `Codex CLI process exited with code ${code}`,
             agent: this.agentType,
           } as OrchestratorUpdate);
 
-          reject(new Error(`Claude Code exited with code ${code}`));
+          reject(new Error(`Codex CLI exited with code ${code}`));
           return;
         }
 
-        // Check for approval-required commands in the response
         const detections = this.approvalDetector.detectInResponse(fullResponse);
 
         for (const detection of detections) {
@@ -246,7 +223,6 @@ export class ClaudeCodeSession extends EventEmitter {
           }
         }
 
-        // Add assistant response to history
         if (fullResponse) {
           this.conversationHistory.push({
             role: 'assistant',
@@ -254,10 +230,8 @@ export class ClaudeCodeSession extends EventEmitter {
           });
         }
 
-        // Mark task as complete
         this.sessionManager.completeTask();
 
-        // Summarize the response for the user
         const summary = this.summarizeResponse(fullResponse);
         this.emit('update', {
           type: 'TASK_COMPLETE',
@@ -271,13 +245,8 @@ export class ClaudeCodeSession extends EventEmitter {
     });
   }
 
-  private handleStreamMessage(
-    message: StreamMessage,
-    userId: string
-  ): void {
-    // Handle different message types from the stream
+  private handleStreamMessage(message: StreamMessage, userId: string): void {
     if (message.type === 'tool_use' && message.tool) {
-      // Check if this tool use requires approval
       const toolInput = JSON.stringify(message.tool_input || {});
       const detection = this.approvalDetector.detect(toolInput);
 
@@ -290,7 +259,6 @@ export class ClaudeCodeSession extends EventEmitter {
         } as OrchestratorUpdate);
       }
     } else if (message.type === 'text' && message.content) {
-      // Periodic status update for long content
       const preview = message.content.substring(0, 100);
       if (preview.length > 50) {
         this.emit('update', {
@@ -304,10 +272,8 @@ export class ClaudeCodeSession extends EventEmitter {
   }
 
   private extractTaskDescription(instruction: string): string {
-    // Extract a short description from the instruction
     const task = this.intentParser.extractTask(instruction);
 
-    // Truncate to first sentence or 100 chars
     const firstSentence = task.split(/[.!?]/)[0];
     if (firstSentence.length <= 100) {
       return firstSentence.trim();
@@ -316,10 +282,8 @@ export class ClaudeCodeSession extends EventEmitter {
   }
 
   private summarizeResponse(response: string): string {
-    // Extract key information from the response
     const lines = response.split('\n').filter((l) => l.trim());
 
-    // Look for success indicators
     const successIndicators = [
       'created', 'added', 'updated', 'committed', 'pushed',
       'installed', 'completed', 'done', 'success', 'finished'
@@ -335,32 +299,13 @@ export class ClaudeCodeSession extends EventEmitter {
     }
 
     if (relevantLines.length > 0) {
-      // Return the most relevant lines (up to 3)
       return relevantLines.slice(0, 3).join('\n');
     }
 
-    // Default: return last few lines
     if (lines.length > 0) {
       return lines.slice(-3).join('\n');
     }
 
     return 'Task completed successfully.';
-  }
-
-  cancelCurrentTask(): void {
-    if (this.currentProcess) {
-      this.currentProcess.kill('SIGTERM');
-      this.currentProcess = null;
-      this.isProcessing = false;
-      this.sessionManager.failTask();
-    }
-  }
-
-  clearHistory(): void {
-    this.conversationHistory = [];
-  }
-
-  getConversationHistory(): ConversationMessage[] {
-    return [...this.conversationHistory];
   }
 }

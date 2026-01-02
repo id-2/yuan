@@ -41,13 +41,14 @@ export class SessionManager {
     this.state.currentBranch = branch;
   }
 
-  startTask(description: string, userId: string): TaskInfo {
+  startTask(description: string, userId: string, agent: TaskInfo['agent']): TaskInfo {
     const task: TaskInfo = {
       id: uuidv4(),
       description,
       status: 'running',
       startedAt: new Date(),
       userId,
+      agent,
     };
     this.state.currentTask = task;
     return task;

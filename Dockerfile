@@ -36,10 +36,12 @@ RUN set -eux; \
     apk add --no-cache ffmpeg libstdc++; \
     apk add --no-cache --virtual .whisper-build git build-base cmake wget; \
     git clone --depth 1 https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp; \
-    make -C /opt/whisper.cpp; \
+    cmake -B /opt/whisper.cpp/build -S /opt/whisper.cpp; \
+    cmake --build /opt/whisper.cpp/build -j --config Release; \
+    mkdir -p /opt/whisper.cpp/models; \
     wget -O /opt/whisper.cpp/models/ggml-base.en.bin \
       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin; \
-    ln -s /opt/whisper.cpp/main /usr/local/bin/whisper; \
+    ln -s /opt/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper; \
     apk del .whisper-build
 WORKDIR /app/packages/telegram-bot
 CMD ["node", "dist/index.js"]

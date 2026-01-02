@@ -93,6 +93,8 @@ export class VoiceHandler {
     }
 
     buffer.timer = null;
+    // Save messageId before processVoiceBufferInternal clears the entries
+    const messageId = buffer.entries[0].messageId;
     const transcription = await this.processVoiceBufferInternal(userId, ctx, buffer);
 
     if (transcription) {
@@ -100,7 +102,7 @@ export class VoiceHandler {
       try {
         await this.orchestratorClient.sendInstruction({
           userId: userId.toString(),
-          messageId: buffer.entries[0].messageId.toString(),
+          messageId: messageId.toString(),
           instruction: transcription,
           timestamp: new Date(),
         });

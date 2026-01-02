@@ -30,6 +30,8 @@ RUN npm install -g @anthropic-ai/claude-code
 
 FROM runtime AS orchestrator
 WORKDIR /app/packages/orchestrator
+# Copy Claude Code settings for permission allow-list
+COPY .claude .claude
 EXPOSE 3000
 CMD ["node", "dist/index.js"]
 

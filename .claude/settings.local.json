@@ -6,13 +6,20 @@
       "Bash(git checkout:*)",
       "Bash(git merge:*)",
       "Bash(git push:*)",
-      "Bash(gh pr list:*)",
-      "WebFetch(domain:github.com)",
       "Bash(git pull:*)",
-      "WebFetch(domain:patch-diff.githubusercontent.com)",
-      "Bash(xargs git log --oneline -1)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git init:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git branch:*)",
+      "Bash(git remote:*)",
+      "Bash(xargs git log --oneline -1)",
+      "Bash(gh:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:patch-diff.githubusercontent.com)",
+      "Bash(docker logs:*)"
     ]
   }
 }

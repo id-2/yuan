@@ -4,7 +4,7 @@ import { OrchestratorClient } from './services/orchestrator.js';
 import { VoiceHandler } from './handlers/voice.js';
 import { TextHandler } from './handlers/text.js';
 import { CallbackHandler } from './handlers/callback.js';
-import type { OrchestratorUpdate } from './types.js';
+import type { OrchestratorUpdate, StatusResponse } from './types.js';
 
 interface BotConfig {
   telegramBotToken: string;
@@ -27,6 +27,9 @@ export class TelegramBot {
   private textHandler: TextHandler;
   private callbackHandler: CallbackHandler;
   private userChatMap: Map<string, number> = new Map();
+  private statusPollInterval: NodeJS.Timeout | null = null;
+  private hasNotifiedDisconnect = false;
+  private lastStatusSummary: string | null = null;
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -149,10 +152,19 @@ export class TelegramBot {
 
     this.orchestratorClient.on('connected', () => {
       console.log('Bot connected to orchestrator');
+      this.hasNotifiedDisconnect = false;
+      this.stopStatusPolling();
+      this.lastStatusSummary = null;
+      this.notifyUsers('✅ Reconnected to orchestrator. Resuming real-time updates.');
     });
 
     this.orchestratorClient.on('disconnected', () => {
       console.log('Bot disconnected from orchestrator');
+      if (!this.hasNotifiedDisconnect) {
+        this.notifyUsers('⚠️ Lost connection to orchestrator. I will retry and keep you updated with periodic status checks.');
+        this.hasNotifiedDisconnect = true;
+      }
+      this.startStatusPolling();
     });
   }
 
@@ -219,6 +231,77 @@ export class TelegramBot {
     });
   }
 
+  private notifyUsers(message: string): void {
+    for (const chatId of this.userChatMap.values()) {
+      this.bot.api.sendMessage(chatId, message).catch((error) => {
+        console.error(`Failed to notify chat ${chatId} about orchestrator status:`, error);
+      });
+    }
+  }
+
+  private startStatusPolling(): void {
+    if (this.statusPollInterval) {
+      return;
+    }
+
+    this.statusPollInterval = setInterval(async () => {
+      try {
+        const status = await this.orchestratorClient.getStatus();
+        await this.handleStatusUpdate(status);
+      } catch (error) {
+        console.error('Failed to poll orchestrator status:', error);
+      }
+    }, 15000);
+  }
+
+  private stopStatusPolling(): void {
+    if (this.statusPollInterval) {
+      clearInterval(this.statusPollInterval);
+      this.statusPollInterval = null;
+    }
+  }
+
+  private async handleStatusUpdate(status: StatusResponse): Promise<void> {
+    const summary = this.formatStatusSummary(status);
+
+    if (!summary || summary === this.lastStatusSummary) {
+      return;
+    }
+
+    this.lastStatusSummary = summary;
+    await Promise.all(
+      Array.from(this.userChatMap.values()).map((chatId) =>
+        this.bot.api.sendMessage(chatId, summary).catch((error) => {
+          console.error(`Failed to send status summary to chat ${chatId}:`, error);
+        })
+      )
+    );
+  }
+
+  private formatStatusSummary(status: StatusResponse): string {
+    if (!status.subAgents?.length && !status.currentTask) {
+      return '📡 Orchestrator status: idle while WebSocket is offline.';
+    }
+
+    const lines: string[] = ['📡 Orchestrator status while WebSocket is offline:'];
+
+    if (status.currentTask) {
+      const { description, status: taskStatus, agent } = status.currentTask;
+      lines.push(`• Current task (${agent ?? 'unknown'}): ${description} [${taskStatus}]`);
+    }
+
+    if (status.subAgents?.length) {
+      lines.push('• Sub-agents:');
+      for (const subAgent of status.subAgents) {
+        lines.push(
+          `   - ${subAgent.id}: ${subAgent.task} (${subAgent.repo}) [${subAgent.status}]`
+        );
+      }
+    }
+
+    return lines.join('\n');
+  }
+
   async start(): Promise<void> {
     // Connect to orchestrator
     try {
@@ -226,6 +309,7 @@ export class TelegramBot {
       console.log('Connected to orchestrator');
     } catch (error) {
       console.warn('Could not connect to orchestrator, will retry:', error);
+      this.startStatusPolling();
     }
 
     // Start the bot

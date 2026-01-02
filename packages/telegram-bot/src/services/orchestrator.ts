@@ -163,6 +163,22 @@ export class OrchestratorClient extends EventEmitter {
     }
   }
 
+  async cancelTask(taskId: string, userId: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/cancel-task`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.secret}`,
+      },
+      body: JSON.stringify({ taskId, userId }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to cancel task: ${response.status} ${text}`);
+    }
+  }
+
   async getStatus(): Promise<StatusResponse> {
     const response = await fetch(`${this.baseUrl}/status`, {
       method: 'GET',

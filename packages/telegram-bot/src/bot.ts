@@ -31,6 +31,7 @@ export class TelegramBot {
   private hasNotifiedDisconnect = false;
   private lastStatusSummary: string | null = null;
   private lastStatusMessages: Map<string, { messageId: number; chatId: number }> = new Map();
+  private taskThreadMap: Map<string, { chatId: number; rootMessageId: number }> = new Map();
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -57,7 +58,7 @@ export class TelegramBot {
       config.telegramBotToken
     );
     this.textHandler = new TextHandler(this.orchestratorClient, this.voiceHandler);
-    this.callbackHandler = new CallbackHandler(this.orchestratorClient);
+    this.callbackHandler = new CallbackHandler(this.orchestratorClient, this.taskThreadMap);
 
     this.setupMiddleware();
     this.setupHandlers();
@@ -187,7 +188,10 @@ export class TelegramBot {
           await this.bot.api.sendMessage(
             chatId,
             `❓ *Input Needed*\n\n${update.message}`,
-            { parse_mode: 'Markdown' }
+            {
+              parse_mode: 'Markdown',
+              reply_to_message_id: this.getThreadMessageId(update),
+            }
           );
           if (update.inputId) {
             this.textHandler.setPendingInput(update.userId, update.inputId, update.expectedInputFormat);
@@ -209,6 +213,7 @@ export class TelegramBot {
           this.textHandler.clearPendingInput(update.userId);
           await this.bot.api.sendMessage(chatId, `❌ *Error*\n\n${update.message}`, {
             parse_mode: 'Markdown',
+            reply_to_message_id: this.getThreadMessageId(update),
           });
           break;
       }
@@ -241,6 +246,20 @@ export class TelegramBot {
       .text('✖️ Cancel', `quick:cancel:${taskId ?? 'unknown'}`);
   }
 
+  private getThreadMessageId(update: OrchestratorUpdate): number | undefined {
+    if (!update.taskId) {
+      return undefined;
+    }
+    const thread = this.taskThreadMap.get(update.taskId);
+    return thread?.rootMessageId;
+  }
+
+  private recordThread(update: OrchestratorUpdate, chatId: number, messageId: number): void {
+    if (update.taskId && !this.taskThreadMap.has(update.taskId)) {
+      this.taskThreadMap.set(update.taskId, { chatId, rootMessageId: messageId });
+    }
+  }
+
   private async sendOrEditStatusMessage(
     chatId: number,
     update: OrchestratorUpdate,
@@ -268,7 +287,10 @@ export class TelegramBot {
 
     const sent = await this.bot.api.sendMessage(chatId, statusText, {
       reply_markup: keyboard,
+      reply_to_message_id: this.getThreadMessageId(update),
     });
+
+    this.recordThread(update, chatId, sent.message_id);
 
     if (!clearAfterSend) {
       this.lastStatusMessages.set(key, { chatId, messageId: sent.message_id });
@@ -295,10 +317,13 @@ export class TelegramBot {
       `*Repo:* ${update.approvalDetails.repo}\n` +
       `*Details:* ${update.approvalDetails.details}`;
 
-    await this.bot.api.sendMessage(chatId, message, {
+    const sentMessage = await this.bot.api.sendMessage(chatId, message, {
       parse_mode: 'Markdown',
+      reply_to_message_id: this.getThreadMessageId(update),
       reply_markup: keyboard,
     });
+
+    this.recordThread(update, chatId, sentMessage.message_id);
   }
 
   private notifyUsers(message: string): void {

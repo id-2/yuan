@@ -52,6 +52,7 @@ export interface InputResponse {
 export interface StatusResponse {
   subAgents: SubAgentStatus[];
   currentTask?: {
+    id: string;
     description: string;
     status: string;
     startedAt: Date;

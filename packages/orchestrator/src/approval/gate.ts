@@ -16,7 +16,8 @@ export class ApprovalGate extends EventEmitter {
     userId: string,
     detection: DetectedApproval,
     repoContext: string,
-    agent?: AgentType
+    agent?: AgentType,
+    taskId?: string
   ): Promise<boolean> {
     const approvalId = uuidv4();
 
@@ -27,6 +28,7 @@ export class ApprovalGate extends EventEmitter {
       message: `Approval required for: ${detection.action}`,
       approvalId,
       agent,
+      taskId,
       approvalDetails: {
         action: detection.action,
         repo: repoContext || 'current directory',
@@ -48,6 +50,7 @@ export class ApprovalGate extends EventEmitter {
           userId,
           message: `⏰ Approval request timed out after 30 minutes. Action was not executed.`,
           agent,
+          taskId,
         } as OrchestratorUpdate);
 
         resolve(false);
@@ -64,6 +67,7 @@ export class ApprovalGate extends EventEmitter {
         resolve,
         timeoutId,
         agent,
+        taskId,
       };
 
       this.pendingApprovals.set(approvalId, pending);

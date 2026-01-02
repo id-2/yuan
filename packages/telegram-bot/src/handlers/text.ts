@@ -80,6 +80,9 @@ export class TextHandler {
         message += `📝 ${status.currentTask.description}\n`;
         message += `Status: ${status.currentTask.status}\n`;
         message += `Started: ${this.formatTime(status.currentTask.startedAt)}\n\n`;
+        if (status.currentTask.agent) {
+          message += `Agent: ${this.formatAgent(status.currentTask.agent)}\n\n`;
+        }
       }
 
       if (status.subAgents.length > 0) {
@@ -131,5 +134,11 @@ export class TextHandler {
       failed: '❌',
     };
     return emojis[status] || '⏹️';
+  }
+
+  private formatAgent(agent?: string): string {
+    if (agent === 'codex') return 'ChatGPT Codex';
+    if (agent === 'claude') return 'Claude Code';
+    return 'Unknown';
   }
 }

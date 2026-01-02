@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
-import type { ConversationMessage, OrchestratorUpdate, TaskInfo } from '../types.js';
+import type { AgentType, ConversationMessage, OrchestratorUpdate, TaskInfo } from '../types.js';
 import { SessionManager } from '../state/session.js';
 import { IntentParser } from './parser.js';
 import { ApprovalDetector, type DetectedApproval } from '../approval/detector.js';
@@ -9,6 +9,9 @@ import { ApprovalGate } from '../approval/gate.js';
 interface ClaudeSessionConfig {
   anthropicApiKey: string;
   workingDirectory?: string;
+  sessionManager?: SessionManager;
+  approvalGate: ApprovalGate;
+  agentType?: AgentType;
 }
 
 interface StreamMessage {
@@ -28,19 +31,16 @@ export class ClaudeCodeSession extends EventEmitter {
   private conversationHistory: ConversationMessage[] = [];
   private isProcessing = false;
   private currentProcess: ChildProcess | null = null;
+  private agentType: AgentType;
 
   constructor(config: ClaudeSessionConfig) {
     super();
     this.config = config;
-    this.sessionManager = new SessionManager();
+    this.sessionManager = config.sessionManager ?? new SessionManager();
     this.intentParser = new IntentParser(this.sessionManager);
     this.approvalDetector = new ApprovalDetector();
-    this.approvalGate = new ApprovalGate();
-
-    // Forward approval gate updates
-    this.approvalGate.on('update', (update: OrchestratorUpdate) => {
-      this.emit('update', update);
-    });
+    this.approvalGate = config.approvalGate;
+    this.agentType = config.agentType ?? 'claude';
   }
 
   getSessionManager(): SessionManager {
@@ -61,6 +61,7 @@ export class ClaudeCodeSession extends EventEmitter {
         type: 'ERROR',
         userId,
         message: 'A task is already in progress. Please wait for it to complete.',
+        agent: this.agentType,
       } as OrchestratorUpdate);
       return;
     }
@@ -80,18 +81,20 @@ export class ClaudeCodeSession extends EventEmitter {
             type: 'STATUS_UPDATE',
             userId,
             message: `📁 Working in repository: ${repoName}${context.branch ? ` (branch: ${context.branch})` : ''}`,
+            agent: this.agentType,
           } as OrchestratorUpdate);
         }
       }
 
       // Start task tracking
       const taskDescription = this.extractTaskDescription(instruction);
-      const task = this.sessionManager.startTask(taskDescription, userId);
+      const task = this.sessionManager.startTask(taskDescription, userId, this.agentType);
 
       this.emit('update', {
         type: 'STATUS_UPDATE',
         userId,
-        message: `🚀 Starting: ${taskDescription}`,
+        message: `🚀 Starting with Claude: ${taskDescription}`,
+        agent: this.agentType,
       } as OrchestratorUpdate);
 
       // Build the prompt with context
@@ -115,6 +118,7 @@ export class ClaudeCodeSession extends EventEmitter {
         type: 'ERROR',
         userId,
         message: `Failed to process instruction: ${error instanceof Error ? error.message : String(error)}`,
+        agent: this.agentType,
       } as OrchestratorUpdate);
     } finally {
       this.isProcessing = false;
@@ -206,6 +210,7 @@ export class ClaudeCodeSession extends EventEmitter {
             type: 'ERROR',
             userId,
             message: `Claude Code process exited with code ${code}`,
+            agent: this.agentType,
           } as OrchestratorUpdate);
 
           reject(new Error(`Claude Code exited with code ${code}`));
@@ -217,19 +222,26 @@ export class ClaudeCodeSession extends EventEmitter {
 
         for (const detection of detections) {
           const repoContext = this.sessionManager.getFullRepoName() || 'current directory';
-          const approved = await this.approvalGate.requestApproval(userId, detection, repoContext);
+          const approved = await this.approvalGate.requestApproval(
+            userId,
+            detection,
+            repoContext,
+            this.agentType
+          );
 
           if (!approved) {
             this.emit('update', {
               type: 'STATUS_UPDATE',
               userId,
               message: `⛔ Action rejected: ${detection.action}`,
+              agent: this.agentType,
             } as OrchestratorUpdate);
           } else {
             this.emit('update', {
               type: 'STATUS_UPDATE',
               userId,
               message: `✅ Action approved: ${detection.action}`,
+              agent: this.agentType,
             } as OrchestratorUpdate);
           }
         }
@@ -251,6 +263,7 @@ export class ClaudeCodeSession extends EventEmitter {
           type: 'TASK_COMPLETE',
           userId,
           message: summary,
+          agent: this.agentType,
         } as OrchestratorUpdate);
 
         resolve();
@@ -273,6 +286,7 @@ export class ClaudeCodeSession extends EventEmitter {
           type: 'STATUS_UPDATE',
           userId,
           message: `🔧 Executing: ${message.tool}`,
+          agent: this.agentType,
         } as OrchestratorUpdate);
       }
     } else if (message.type === 'text' && message.content) {
@@ -283,6 +297,7 @@ export class ClaudeCodeSession extends EventEmitter {
           type: 'STATUS_UPDATE',
           userId,
           message: `📝 Working: ${preview}...`,
+          agent: this.agentType,
         } as OrchestratorUpdate);
       }
     }

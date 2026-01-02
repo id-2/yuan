@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { EventEmitter } from 'events';
-import type { PendingApproval, OrchestratorUpdate } from '../types.js';
+import type { AgentType, PendingApproval, OrchestratorUpdate } from '../types.js';
 import type { DetectedApproval } from './detector.js';
 
 const APPROVAL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
@@ -15,7 +15,8 @@ export class ApprovalGate extends EventEmitter {
   async requestApproval(
     userId: string,
     detection: DetectedApproval,
-    repoContext: string
+    repoContext: string,
+    agent?: AgentType
   ): Promise<boolean> {
     const approvalId = uuidv4();
 
@@ -25,6 +26,7 @@ export class ApprovalGate extends EventEmitter {
       userId,
       message: `Approval required for: ${detection.action}`,
       approvalId,
+      agent,
       approvalDetails: {
         action: detection.action,
         repo: repoContext || 'current directory',
@@ -45,6 +47,7 @@ export class ApprovalGate extends EventEmitter {
           type: 'ERROR',
           userId,
           message: `⏰ Approval request timed out after 30 minutes. Action was not executed.`,
+          agent,
         } as OrchestratorUpdate);
 
         resolve(false);
@@ -60,6 +63,7 @@ export class ApprovalGate extends EventEmitter {
         createdAt: new Date(),
         resolve,
         timeoutId,
+        agent,
       };
 
       this.pendingApprovals.set(approvalId, pending);

@@ -6,12 +6,15 @@ export type MessageType =
   | 'TASK_COMPLETE'
   | 'ERROR';
 
+export type AgentType = 'claude' | 'codex';
+
 // Orchestrator update message
 export interface OrchestratorUpdate {
   type: MessageType;
   userId: string;
   agentId?: string;
   message: string;
+  agent?: AgentType;
   approvalId?: string;
   approvalDetails?: {
     action: string;
@@ -42,6 +45,7 @@ export interface StatusResponse {
     description: string;
     status: string;
     startedAt: Date;
+    agent?: AgentType;
   };
 }
 

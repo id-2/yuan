@@ -6,12 +6,15 @@ export type MessageType =
   | 'TASK_COMPLETE'
   | 'ERROR';
 
+export type AgentType = 'claude' | 'codex';
+
 // Update sent to bot
 export interface OrchestratorUpdate {
   type: MessageType;
   userId: string;
   agentId?: string;
   message: string;
+  agent?: AgentType;
   approvalId?: string;
   approvalDetails?: {
     action: string;
@@ -50,6 +53,7 @@ export interface TaskInfo {
   status: 'running' | 'waiting_input' | 'waiting_approval' | 'completed' | 'failed';
   startedAt: Date;
   userId: string;
+  agent: AgentType;
 }
 
 export interface SubAgent {
@@ -72,6 +76,7 @@ export interface PendingApproval {
   createdAt: Date;
   resolve: (approved: boolean) => void;
   timeoutId: NodeJS.Timeout;
+  agent?: AgentType;
 }
 
 // Claude Code conversation message
@@ -95,5 +100,6 @@ export interface StatusResponse {
     description: string;
     status: string;
     startedAt: Date;
+    agent?: AgentType;
   };
 }

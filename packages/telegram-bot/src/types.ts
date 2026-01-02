@@ -13,6 +13,7 @@ export interface OrchestratorUpdate {
   type: MessageType;
   userId: string;
   agentId?: string;
+  taskId?: string;
   message: string;
   agent?: AgentType;
   approvalId?: string;
@@ -42,6 +43,7 @@ export interface ApprovalResponse {
 export interface StatusResponse {
   subAgents: SubAgentStatus[];
   currentTask?: {
+    id: string;
     description: string;
     status: string;
     startedAt: Date;

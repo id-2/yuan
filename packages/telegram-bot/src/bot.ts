@@ -27,6 +27,7 @@ export class TelegramBot {
   private textHandler: TextHandler;
   private callbackHandler: CallbackHandler;
   private userChatMap: Map<string, number> = new Map();
+  private taskThreadMap: Map<string, { chatId: number; rootMessageId: number }> = new Map();
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -53,7 +54,7 @@ export class TelegramBot {
       config.telegramBotToken
     );
     this.textHandler = new TextHandler(this.orchestratorClient, this.voiceHandler);
-    this.callbackHandler = new CallbackHandler(this.orchestratorClient);
+    this.callbackHandler = new CallbackHandler(this.orchestratorClient, this.taskThreadMap);
 
     this.setupMiddleware();
     this.setupHandlers();
@@ -167,15 +168,13 @@ export class TelegramBot {
     try {
       switch (update.type) {
         case 'STATUS_UPDATE':
-          await this.bot.api.sendMessage(chatId, `📊 ${update.message}`);
+          await this.sendTaskMessage(chatId, update, `📊 ${update.message}`);
           break;
 
         case 'INPUT_NEEDED':
-          await this.bot.api.sendMessage(
-            chatId,
-            `❓ *Input Needed*\n\n${update.message}`,
-            { parse_mode: 'Markdown' }
-          );
+          await this.sendTaskMessage(chatId, update, `❓ *Input Needed*\n\n${update.message}`, {
+            parse_mode: 'Markdown',
+          });
           break;
 
         case 'APPROVAL_REQUIRED':
@@ -183,11 +182,11 @@ export class TelegramBot {
           break;
 
         case 'TASK_COMPLETE':
-          await this.bot.api.sendMessage(chatId, `✅ ${update.message}`);
+          await this.sendTaskMessage(chatId, update, `✅ ${update.message}`);
           break;
 
         case 'ERROR':
-          await this.bot.api.sendMessage(chatId, `❌ *Error*\n\n${update.message}`, {
+          await this.sendTaskMessage(chatId, update, `❌ *Error*\n\n${update.message}`, {
             parse_mode: 'Markdown',
           });
           break;
@@ -195,6 +194,34 @@ export class TelegramBot {
     } catch (error) {
       console.error('Failed to send update to user:', error);
     }
+  }
+
+  private getThreadMessageId(update: OrchestratorUpdate): number | undefined {
+    if (!update.taskId) {
+      return undefined;
+    }
+    const thread = this.taskThreadMap.get(update.taskId);
+    return thread?.rootMessageId;
+  }
+
+  private recordThread(update: OrchestratorUpdate, chatId: number, messageId: number): void {
+    if (update.taskId && !this.taskThreadMap.has(update.taskId)) {
+      this.taskThreadMap.set(update.taskId, { chatId, rootMessageId: messageId });
+    }
+  }
+
+  private async sendTaskMessage(
+    chatId: number,
+    update: OrchestratorUpdate,
+    text: string,
+    options?: Record<string, unknown>
+  ): Promise<void> {
+    const replyTo = this.getThreadMessageId(update);
+    const message = await this.bot.api.sendMessage(chatId, text, {
+      ...options,
+      reply_to_message_id: replyTo,
+    });
+    this.recordThread(update, chatId, message.message_id);
   }
 
   private async sendApprovalRequest(chatId: number, update: OrchestratorUpdate): Promise<void> {
@@ -213,10 +240,13 @@ export class TelegramBot {
       `*Repo:* ${update.approvalDetails.repo}\n` +
       `*Details:* ${update.approvalDetails.details}`;
 
-    await this.bot.api.sendMessage(chatId, message, {
+    const sentMessage = await this.bot.api.sendMessage(chatId, message, {
       parse_mode: 'Markdown',
+      reply_to_message_id: this.getThreadMessageId(update),
       reply_markup: keyboard,
     });
+
+    this.recordThread(update, chatId, sentMessage.message_id);
   }
 
   async start(): Promise<void> {

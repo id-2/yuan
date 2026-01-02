@@ -9,6 +9,7 @@ interface SubAgentSpawnRequest {
   branch?: string;
   workingDirectory: string;
   userId: string;
+  taskId?: string;
 }
 
 interface RunningSubAgent extends SubAgent {
@@ -53,6 +54,7 @@ export class SubAgentManager extends EventEmitter {
       userId: request.userId,
       agentId,
       message: `🚀 Started sub-agent for: ${request.task}`,
+      taskId: request.taskId,
     } as OrchestratorUpdate);
 
     return {
@@ -149,6 +151,7 @@ If you encounter any issues that require user input, stop and describe what you 
           userId: agent.userId,
           agentId: agent.id,
           message: `✅ Sub-agent completed: ${request.task}`,
+          taskId: request.taskId,
         } as OrchestratorUpdate);
 
         resolve();

@@ -13,6 +13,7 @@ export interface OrchestratorUpdate {
   type: MessageType;
   userId: string;
   agentId?: string;
+  taskId?: string;
   message: string;
   agent?: AgentType;
   approvalId?: string;
@@ -77,6 +78,7 @@ export interface PendingApproval {
   resolve: (approved: boolean) => void;
   timeoutId: NodeJS.Timeout;
   agent?: AgentType;
+  taskId?: string;
 }
 
 // Claude Code conversation message
@@ -97,6 +99,7 @@ export interface ApprovalPatterns {
 export interface StatusResponse {
   subAgents: SubAgent[];
   currentTask?: {
+    id: string;
     description: string;
     status: string;
     startedAt: Date;

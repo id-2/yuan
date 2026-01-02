@@ -1,4 +1,4 @@
-import type { Context } from 'grammy';
+import { InlineKeyboard, type Context } from 'grammy';
 import type { OrchestratorClient } from '../services/orchestrator.js';
 import type { VoiceHandler } from './voice.js';
 
@@ -34,7 +34,7 @@ export class TextHandler {
     }
 
     if (lowerText === 'cancel') {
-      await this.handleCancelCommand(ctx);
+      await this.handleCancelCommand(ctx, userId);
       return;
     }
 
@@ -74,15 +74,21 @@ export class TextHandler {
       }
 
       let message = '📊 *Active Tasks:*\n\n';
+      let replyMarkup: InlineKeyboard | undefined;
 
       if (status.currentTask) {
         message += `*Current Task:*\n`;
+        message += `ID: \`${status.currentTask.id}\`\n`;
         message += `📝 ${status.currentTask.description}\n`;
         message += `Status: ${status.currentTask.status}\n`;
         message += `Started: ${this.formatTime(status.currentTask.startedAt)}\n\n`;
         if (status.currentTask.agent) {
           message += `Agent: ${this.formatAgent(status.currentTask.agent)}\n\n`;
         }
+
+        replyMarkup = new InlineKeyboard()
+          .text('🔎 Jump to updates', `jump:${status.currentTask.id}`)
+          .text('🛑 Cancel', `cancel:${status.currentTask.id}`);
       }
 
       if (status.subAgents.length > 0) {
@@ -97,17 +103,28 @@ export class TextHandler {
         }
       }
 
-      await ctx.reply(message, { parse_mode: 'Markdown' });
+      await ctx.reply(message, { parse_mode: 'Markdown', reply_markup: replyMarkup });
     } catch (error) {
       console.error('Failed to get status:', error);
       await ctx.reply('❌ Couldn\'t retrieve status. The processing server might be unavailable.');
     }
   }
 
-  private async handleCancelCommand(ctx: Context): Promise<void> {
+  private async handleCancelCommand(ctx: Context, userId: number): Promise<void> {
     await ctx.reply('⚠️ Cancel command received. Attempting to stop current task...');
-    // TODO: Implement cancel functionality in orchestrator
-    await ctx.reply('ℹ️ Cancel functionality will be available in a future update.');
+    try {
+      const status = await this.orchestratorClient.getStatus();
+      if (!status.currentTask) {
+        await ctx.reply('ℹ️ No active task to cancel right now.');
+        return;
+      }
+
+      await this.orchestratorClient.cancelTask(status.currentTask.id, userId.toString());
+      await ctx.reply(`🛑 Cancellation requested for task ${status.currentTask.id}.`);
+    } catch (error) {
+      console.error('Failed to cancel task:', error);
+      await ctx.reply('❌ Could not cancel the task. Please try again or check back soon.');
+    }
   }
 
   private formatTime(date: Date): string {

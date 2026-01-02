@@ -80,6 +80,10 @@ export class SessionManager {
     return this.state.currentTask;
   }
 
+  getCurrentTaskId(): string | undefined {
+    return this.state.currentTask?.id;
+  }
+
   addSubAgent(task: string, repo: string): SubAgent {
     const agent: SubAgent = {
       id: uuidv4(),

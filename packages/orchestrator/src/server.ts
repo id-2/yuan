@@ -119,6 +119,7 @@ export class OrchestratorServer {
             userId: instruction.userId,
             message: 'A task is already in progress. Please wait for it to complete.',
             agent: targetAgent,
+            taskId: this.sessionManager.getCurrentTaskId(),
           });
           return;
         }
@@ -129,6 +130,7 @@ export class OrchestratorServer {
           userId: instruction.userId,
           message: `🤖 Routing to ${agentLabel} based on your request.`,
           agent: targetAgent,
+          taskId: this.sessionManager.getCurrentTaskId(),
         });
 
         // Process asynchronously
@@ -163,6 +165,42 @@ export class OrchestratorServer {
       }
     });
 
+    // Cancel current task
+    this.app.post('/cancel', (req: Request, res: Response) => {
+      try {
+        const { taskId, userId } = req.body as { taskId?: string; userId?: string };
+
+        if (!taskId || !userId) {
+          res.status(400).json({ error: 'Missing taskId or userId' });
+          return;
+        }
+
+        const currentTask = this.sessionManager.getCurrentTask();
+        if (!currentTask || currentTask.id !== taskId || currentTask.userId !== userId) {
+          res.status(404).json({ error: 'Task not found or already finished' });
+          return;
+        }
+
+        const targetSession = currentTask.agent === 'codex' ? this.codexSession : this.claudeSession;
+        targetSession.cancelCurrentTask();
+        this.sessionManager.failTask();
+        this.approvalGate.cancelAllForUser(userId);
+
+        this.broadcastUpdate({
+          type: 'STATUS_UPDATE',
+          userId,
+          message: `🛑 Task ${taskId} cancelled by user.`,
+          agent: currentTask.agent,
+          taskId,
+        });
+
+        res.json({ status: 'cancelled' });
+      } catch (error) {
+        console.error('Error cancelling task:', error);
+        res.status(500).json({ error: 'Failed to cancel task' });
+      }
+    });
+
     // Get status of all tasks
     this.app.get('/status', (_req: Request, res: Response) => {
       try {
@@ -173,6 +211,7 @@ export class OrchestratorServer {
           subAgents,
           currentTask: currentTask
             ? {
+                id: currentTask.id,
                 description: currentTask.description,
                 status: currentTask.status,
                 startedAt: currentTask.startedAt,

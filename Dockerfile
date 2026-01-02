@@ -32,12 +32,14 @@ CMD ["node", "dist/index.js"]
 
 FROM runtime AS telegram-bot
 # Install ffmpeg and whisper.cpp for local transcription
-RUN apk add --no-cache ffmpeg libstdc++ \
-    && apk add --no-cache --virtual .whisper-build git build-base cmake bash wget \
-    && git clone --depth 1 https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp \
-    && make -C /opt/whisper.cpp \
-    && bash /opt/whisper.cpp/models/download-ggml-model.sh base.en \
-    && ln -s /opt/whisper.cpp/main /usr/local/bin/whisper \
-    && apk del .whisper-build
+RUN set -eux; \
+    apk add --no-cache ffmpeg libstdc++; \
+    apk add --no-cache --virtual .whisper-build git build-base wget; \
+    git clone --depth 1 https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp; \
+    make -C /opt/whisper.cpp; \
+    wget -O /opt/whisper.cpp/models/ggml-base.en.bin \
+      https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin; \
+    ln -s /opt/whisper.cpp/main /usr/local/bin/whisper; \
+    apk del .whisper-build
 WORKDIR /app/packages/telegram-bot
 CMD ["node", "dist/index.js"]

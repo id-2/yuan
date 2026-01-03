@@ -1,5 +1,21 @@
 import type { SessionManager } from '../state/session.js';
 
+// Common English words that should never be interpreted as repo names
+const RESERVED_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'if', 'then', 'else', 'for', 'to', 'from',
+  'with', 'in', 'on', 'at', 'by', 'as', 'is', 'it', 'be', 'are', 'was', 'were',
+  'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'have', 'has',
+  'do', 'does', 'did', 'this', 'that', 'these', 'those', 'my', 'your', 'our', 'their',
+  'new', 'old', 'all', 'some', 'any', 'no', 'not', 'deploy', 'push', 'pull', 'merge',
+  'create', 'update', 'delete', 'add', 'remove', 'get', 'set', 'run', 'start', 'stop',
+  'called', 'named', 'use', 'using', 'like', 'make', 'please', 'help', 'want', 'need',
+]);
+
+function isValidRepoName(name: string): boolean {
+  if (!name || name.length < 2) return false;
+  return !RESERVED_WORDS.has(name.toLowerCase());
+}
+
 export interface ParsedContext {
   org?: string;
   repo?: string;
@@ -21,11 +37,11 @@ export class IntentParser {
     const lower = instruction.toLowerCase();
     let context: ParsedContext | null = null;
 
-    // Pattern: "create a new repo called X"
+    // Pattern: "create a new repo called X" - require "called" or "named"
     const createRepoMatch = lower.match(
-      /create\s+(?:a\s+)?(?:new\s+)?repo(?:sitory)?\s+(?:called\s+|named\s+)?["']?(\S+?)["']?(?:\s|$)/
+      /create\s+(?:a\s+)?(?:new\s+)?repo(?:sitory)?\s+(?:called|named)\s+["']?(\S+?)["']?(?:\s|$)/
     );
-    if (createRepoMatch) {
+    if (createRepoMatch && isValidRepoName(createRepoMatch[1])) {
       context = {
         repo: createRepoMatch[1],
         action: 'create',
@@ -36,7 +52,7 @@ export class IntentParser {
     const orgRepoMatch = lower.match(
       /(?:go\s+to|switch\s+to|use)\s+(?:the\s+)?org(?:anization)?\s+["']?(\S+?)["']?\s*[,\s]+\s*repo(?:sitory)?\s+["']?(\S+?)["']?(?:\s|$)/
     );
-    if (orgRepoMatch) {
+    if (orgRepoMatch && isValidRepoName(orgRepoMatch[1]) && isValidRepoName(orgRepoMatch[2])) {
       context = {
         org: orgRepoMatch[1],
         repo: orgRepoMatch[2],
@@ -53,8 +69,10 @@ export class IntentParser {
       // Check if it's org/repo format
       if (repoName.includes('/')) {
         const [org, repo] = repoName.split('/');
-        context = { org, repo, action: 'switch' };
-      } else {
+        if (isValidRepoName(org) && isValidRepoName(repo)) {
+          context = { org, repo, action: 'switch' };
+        }
+      } else if (isValidRepoName(repoName)) {
         context = { repo: repoName, action: 'switch' };
       }
     }
@@ -82,7 +100,7 @@ export class IntentParser {
     const simpleRepoMatch = lower.match(
       /(?:the|in)\s+["']?(\w+)["']?\s+repo(?:sitory)?/
     );
-    if (simpleRepoMatch && !context) {
+    if (simpleRepoMatch && !context && isValidRepoName(simpleRepoMatch[1])) {
       context = { repo: simpleRepoMatch[1], action: 'switch' };
     }
 

@@ -5,6 +5,25 @@
 
 const DEFAULT_REPO_KEY = '__default__';
 
+// Common English words that should never be interpreted as repo names
+const RESERVED_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'if', 'then', 'else', 'for', 'to', 'from',
+  'with', 'in', 'on', 'at', 'by', 'as', 'is', 'it', 'be', 'are', 'was', 'were',
+  'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'have', 'has',
+  'do', 'does', 'did', 'this', 'that', 'these', 'those', 'my', 'your', 'our', 'their',
+  'new', 'old', 'all', 'some', 'any', 'no', 'not', 'deploy', 'push', 'pull', 'merge',
+  'create', 'update', 'delete', 'add', 'remove', 'get', 'set', 'run', 'start', 'stop',
+  'called', 'named', 'use', 'using', 'like', 'make', 'please', 'help', 'want', 'need',
+]);
+
+/**
+ * Check if a string is a valid repo name (not a reserved word)
+ */
+function isValidRepoName(name: string): boolean {
+  if (!name || name.length < 2) return false;
+  return !RESERVED_WORDS.has(name.toLowerCase());
+}
+
 export interface RepoDetectionResult {
   repoKey: string;
   org?: string;
@@ -19,20 +38,24 @@ export interface RepoDetectionResult {
 export function detectRepo(instruction: string): RepoDetectionResult {
   const lower = instruction.toLowerCase();
 
-  // Pattern: "create a new repo called X" or "create new repository X"
+  // Pattern: "create a new repo called X" or "create new private GitHub repository named X"
+  // Allow optional words (private, public, github, new, etc.) between create and repo
+  // Require "called" or "named" to avoid matching "create a new repository and deploy..."
   const createRepoMatch = lower.match(
-    /create\s+(?:a\s+)?(?:new\s+)?repo(?:sitory)?\s+(?:called\s+|named\s+)?["']?([a-z0-9_-]+(?:\/[a-z0-9_-]+)?)["']?/i
+    /create\s+(?:a\s+)?(?:new\s+)?(?:private\s+)?(?:public\s+)?(?:github\s+)?repo(?:sitory)?\s+(?:called|named)\s+["']?([a-z0-9_-]+(?:\/[a-z0-9_-]+)?)["']?/i
   );
   if (createRepoMatch) {
     const repoName = createRepoMatch[1];
-    const parts = repoName.split('/');
-    return {
-      repoKey: repoName.toLowerCase(),
-      org: parts.length > 1 ? parts[0] : undefined,
-      repo: parts.length > 1 ? parts[1] : parts[0],
-      isNewRepo: true,
-      confidence: 'high',
-    };
+    if (isValidRepoName(repoName)) {
+      const parts = repoName.split('/');
+      return {
+        repoKey: repoName.toLowerCase(),
+        org: parts.length > 1 ? parts[0] : undefined,
+        repo: parts.length > 1 ? parts[1] : parts[0],
+        isNewRepo: true,
+        confidence: 'high',
+      };
+    }
   }
 
   // Pattern: GitHub URL - github.com/org/repo or https://github.com/org/repo
@@ -57,13 +80,15 @@ export function detectRepo(instruction: string): RepoDetectionResult {
   );
   if (orgRepoSlashMatch) {
     const [org, repo] = orgRepoSlashMatch[1].split('/');
-    return {
-      repoKey: orgRepoSlashMatch[1],
-      org,
-      repo,
-      isNewRepo: false,
-      confidence: 'high',
-    };
+    if (isValidRepoName(org) && isValidRepoName(repo)) {
+      return {
+        repoKey: orgRepoSlashMatch[1],
+        org,
+        repo,
+        isNewRepo: false,
+        confidence: 'high',
+      };
+    }
   }
 
   // Pattern: "go to org X, repo Y" or "switch to org X repo Y"
@@ -73,13 +98,15 @@ export function detectRepo(instruction: string): RepoDetectionResult {
   if (orgRepoMatch) {
     const org = orgRepoMatch[1];
     const repo = orgRepoMatch[2];
-    return {
-      repoKey: `${org}/${repo}`,
-      org,
-      repo,
-      isNewRepo: false,
-      confidence: 'high',
-    };
+    if (isValidRepoName(org) && isValidRepoName(repo)) {
+      return {
+        repoKey: `${org}/${repo}`,
+        org,
+        repo,
+        isNewRepo: false,
+        confidence: 'high',
+      };
+    }
   }
 
   // Pattern: "switch to repo X" or "go to repo X" or "in repo X"
@@ -90,27 +117,30 @@ export function detectRepo(instruction: string): RepoDetectionResult {
     const repoName = switchRepoMatch[1];
     if (repoName.includes('/')) {
       const [org, repo] = repoName.split('/');
+      if (isValidRepoName(org) && isValidRepoName(repo)) {
+        return {
+          repoKey: repoName,
+          org,
+          repo,
+          isNewRepo: false,
+          confidence: 'high',
+        };
+      }
+    } else if (isValidRepoName(repoName)) {
       return {
         repoKey: repoName,
-        org,
-        repo,
+        repo: repoName,
         isNewRepo: false,
-        confidence: 'high',
+        confidence: 'medium',
       };
     }
-    return {
-      repoKey: repoName,
-      repo: repoName,
-      isNewRepo: false,
-      confidence: 'medium',
-    };
   }
 
   // Pattern: "the X repo" or "X repository"
   const simpleRepoMatch = lower.match(
     /(?:the|in)\s+["']?([a-z0-9_-]+)["']?\s+repo(?:sitory)?/
   );
-  if (simpleRepoMatch) {
+  if (simpleRepoMatch && isValidRepoName(simpleRepoMatch[1])) {
     return {
       repoKey: simpleRepoMatch[1],
       repo: simpleRepoMatch[1],
@@ -127,20 +157,23 @@ export function detectRepo(instruction: string): RepoDetectionResult {
     const repoName = cloneMatch[1].toLowerCase();
     if (repoName.includes('/')) {
       const [org, repo] = repoName.split('/');
+      if (isValidRepoName(org) && isValidRepoName(repo)) {
+        return {
+          repoKey: repoName,
+          org,
+          repo,
+          isNewRepo: true,
+          confidence: 'high',
+        };
+      }
+    } else if (isValidRepoName(repoName)) {
       return {
         repoKey: repoName,
-        org,
-        repo,
+        repo: repoName,
         isNewRepo: true,
-        confidence: 'high',
+        confidence: 'medium',
       };
     }
-    return {
-      repoKey: repoName,
-      repo: repoName,
-      isNewRepo: true,
-      confidence: 'medium',
-    };
   }
 
   // Pattern: "in the same repo" or "same repository" - use default (caller should use current context)

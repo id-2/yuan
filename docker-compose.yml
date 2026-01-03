@@ -21,7 +21,7 @@ services:
       - "${ORCHESTRATOR_PORT:-3000}:3000"
     volumes:
       # Named volume for Claude credentials (run 'docker compose exec orchestrator claude login' to authenticate)
-      - claude-credentials:/root/.claude
+      - claude-credentials:/home/claude/.claude
     restart: unless-stopped
 
   telegram-bot:

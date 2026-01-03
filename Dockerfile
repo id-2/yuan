@@ -30,8 +30,19 @@ RUN npm install -g @anthropic-ai/claude-code
 
 FROM runtime AS orchestrator
 WORKDIR /app/packages/orchestrator
+
+# Create non-root user (Claude Code refuses --dangerously-skip-permissions as root)
+RUN addgroup -g 1001 claude && adduser -u 1001 -G claude -s /bin/sh -D claude
+
+# Create workdir and set ownership
+RUN mkdir -p /app/workdir /home/claude/.claude && chown -R claude:claude /app /home/claude
+
 # Copy Claude Code settings for permission allow-list
-COPY .claude .claude
+COPY --chown=claude:claude .claude /home/claude/.claude
+
+# Switch to non-root user
+USER claude
+
 EXPOSE 3000
 CMD ["node", "dist/index.js"]
 

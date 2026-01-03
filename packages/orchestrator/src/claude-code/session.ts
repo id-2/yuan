@@ -191,6 +191,26 @@ export class ClaudeCodeSession extends EventEmitter {
         '--verbose', // Required for stream-json output
         '--output-format', 'stream-json', // JSON streaming output
         '--input-format', 'stream-json', // Stream input over stdin
+        '--allowedTools', [
+          'Read', 'Write', 'Edit', 'Glob', 'Grep',
+          'Bash(mkdir:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Bash(cp:*)', 'Bash(mv:*)',
+          'Bash(rm:*)', 'Bash(touch:*)', 'Bash(head:*)', 'Bash(tail:*)',
+          // Git commands
+          'Bash(git init:*)', 'Bash(git add:*)', 'Bash(git commit:*)', 'Bash(git push:*)',
+          'Bash(git pull:*)', 'Bash(git fetch:*)', 'Bash(git checkout:*)', 'Bash(git branch:*)',
+          'Bash(git merge:*)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)',
+          'Bash(git clone:*)', 'Bash(git remote:*)', 'Bash(git stash:*)',
+          // GitHub CLI - safe commands only (no delete/archive)
+          'Bash(gh repo create:*)', 'Bash(gh repo clone:*)', 'Bash(gh repo view:*)',
+          'Bash(gh repo list:*)', 'Bash(gh repo fork:*)',
+          'Bash(gh pr create:*)', 'Bash(gh pr list:*)', 'Bash(gh pr view:*)',
+          'Bash(gh pr checkout:*)', 'Bash(gh pr comment:*)', 'Bash(gh pr edit:*)',
+          'Bash(gh issue create:*)', 'Bash(gh issue list:*)', 'Bash(gh issue view:*)',
+          'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
+          'Bash(gh auth status:*)', 'Bash(gh api:*)',
+          // Node/npm
+          'Bash(npm:*)', 'Bash(npx:*)', 'Bash(node:*)',
+        ].join(','),
       ];
 
       // Build environment - only include API key if provided (otherwise uses manual login)

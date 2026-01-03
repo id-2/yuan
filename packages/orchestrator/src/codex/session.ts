@@ -82,6 +82,7 @@ export class CodexSession extends EventEmitter {
     this.isProcessing = true;
 
     try {
+      // Parse for repo context changes
       const context = this.intentParser.parseRepoContext(instruction);
 
       const taskDescription = this.extractTaskDescription(instruction);

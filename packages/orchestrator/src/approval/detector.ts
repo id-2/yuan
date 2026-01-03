@@ -27,12 +27,20 @@ const APPROVAL_PATTERNS: ApprovalPatterns = {
     /pnpm\s+publish/i,
   ],
   deploy: [
-    /\bdeploy\b/i,
+    // Only match deploy as a command, not in descriptions
+    /^deploy\s+/i,                    // "deploy to production"
+    /npm\s+run\s+deploy/i,            // npm run deploy
+    /yarn\s+deploy/i,                 // yarn deploy
+    /pnpm\s+deploy/i,                 // pnpm deploy
     /\bshipit\b/i,
-    /\brelease\b/i,
     /kubectl\s+apply/i,
     /docker\s+push/i,
     /terraform\s+apply/i,
+    /vercel\s+(?:deploy|--prod)/i,    // vercel deploy
+    /netlify\s+deploy/i,              // netlify deploy
+    /firebase\s+deploy/i,             // firebase deploy
+    /fly\s+deploy/i,                  // fly deploy
+    /railway\s+up/i,                  // railway up
   ],
 };
 
@@ -57,9 +65,11 @@ export class ApprovalDetector {
 
   /**
    * Detect approvals in Claude Code's response text
+   * Deduplicates by action to avoid multiple approval requests for the same action type
    */
   detectInResponse(response: string): DetectedApproval[] {
     const detections: DetectedApproval[] = [];
+    const seenActions = new Set<string>();
     const lines = response.split('\n');
 
     for (const line of lines) {
@@ -71,13 +81,58 @@ export class ApprovalDetector {
         continue;
       }
 
+      // Skip markdown formatting and descriptions (not actual commands)
+      if (trimmed.startsWith('*') || trimmed.startsWith('-') || trimmed.startsWith('>')) {
+        continue;
+      }
+
+      // Skip numbered lists (1. 2. etc.)
+      if (/^\d+\./.test(trimmed)) {
+        continue;
+      }
+
+      // Skip lines that look like file paths or descriptions rather than commands
+      if (trimmed.includes('.yml') || trimmed.includes('.yaml') || trimmed.includes('.json')) {
+        // Only allow if it looks like an actual command (starts with a command word)
+        if (!this.looksLikeCommand(trimmed)) {
+          continue;
+        }
+      }
+
       const detection = this.detect(trimmed);
       if (detection) {
-        detections.push(detection);
+        // Deduplicate by action - only keep one per action type
+        const actionKey = `${detection.category}:${detection.action}`;
+        if (!seenActions.has(actionKey)) {
+          seenActions.add(actionKey);
+          detections.push(detection);
+        }
       }
     }
 
     return detections;
+  }
+
+  /**
+   * Check if a line looks like an actual command rather than a description
+   */
+  private looksLikeCommand(line: string): boolean {
+    const lower = line.toLowerCase();
+    // Common command prefixes
+    const commandPatterns = [
+      /^git\s+/,
+      /^gh\s+/,
+      /^npm\s+/,
+      /^yarn\s+/,
+      /^pnpm\s+/,
+      /^kubectl\s+/,
+      /^docker\s+/,
+      /^terraform\s+/,
+      /^deploy\s+/,
+      /^\$\s*/,  // Shell prompt
+      /^>\s*/,   // PowerShell prompt
+    ];
+    return commandPatterns.some(p => p.test(lower));
   }
 
   private buildApprovalInfo(
@@ -105,6 +160,11 @@ export class ApprovalDetector {
         'kubectl.*apply': 'Apply Kubernetes configuration',
         'docker.*push': 'Push Docker image',
         'terraform.*apply': 'Apply Terraform changes',
+        'vercel': 'Deploy to Vercel',
+        'netlify': 'Deploy to Netlify',
+        'firebase': 'Deploy to Firebase',
+        'fly': 'Deploy to Fly.io',
+        'railway': 'Deploy to Railway',
       },
     };
 
